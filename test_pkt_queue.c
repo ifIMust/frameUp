@@ -4,17 +4,26 @@
 
 int testMultiplePacketStart();
 int testGivenExample();
-int testIncompleteFrameMidEscape();
+int testIncompleteFrameMidEscapeEnd();
+int testIncompleteFrameMidEscapeStart();
 int testTwoPacketsInOneWrite();
 
 int main()
 {
-  int result0, result1, result2, result3;
-  result0 = testMultiplePacketStart();
-  result1 = testGivenExample();
-  result2 = testIncompleteFrameMidEscape();
-  result3 = testTwoPacketsInOneWrite();
-  return result0 + result1 + result2 + result3;
+  const int numTests = 5;
+  int result[numTests];
+  result[0] = testMultiplePacketStart();
+  result[1] = testGivenExample();
+  result[2] = testIncompleteFrameMidEscapeEnd();
+  result[3] = testIncompleteFrameMidEscapeStart();
+  result[4] = testTwoPacketsInOneWrite();
+  for (int i = 0; i < numTests; i = i + 1)
+  {
+    if (result[i] != 0)
+    {
+      return result[i];
+    }
+  }
 }
 
 int testMultiplePacketStart()
@@ -75,11 +84,11 @@ int testGivenExample()
 }
 
 /* Test that a packet-end that follows an escape causes the partial packet to be dropped. */
-int testIncompleteFrameMidEscape()
+int testIncompleteFrameMidEscapeEnd()
 {
   uint8_t datums[MAX_DECODED_PKT_LENGTH];
   ssize_t bytes_read = 0;
-  uint8_t data[] = { 0x02, 0x04, 0x05, 0x10, 0x03, 0x02, 0x56, 0x03 };
+  uint8_t data[] = { 0x02, 0x04, 0x05, 0x10, 0x03, 0x03, 0x02, 0x56, 0x03 };
   pkt_queue_t* q = pkt_queue_create();
   pkt_queue_write_bytes(q, sizeof(data), data);
   pkt_queue_read_pkt(q, &bytes_read, datums);
@@ -92,6 +101,46 @@ int testIncompleteFrameMidEscape()
     return 8;
   }
   pkt_queue_close(q);
+  pkt_queue_destroy(q);
+  return 0;
+};
+
+/* Test that a packet-start that follows an escape causes the partial packet to be dropped. */
+/* Question: How can I tell whether a packet is improperly encoded versus incomplete? */
+/* Incomplete: finding a 0x02 after an escape means begin a new packet immediately. */
+/* Improperly encoded: finidng a 0x02 after an escape means drop everything and look for the next 0x02. */
+// uint8_t data[] = { 0x02, 0x10, 0x02, 0x42, 0x03, 0x02, 0x56, 0x03 };
+int testIncompleteFrameMidEscapeStart()
+{
+  uint8_t datums[MAX_DECODED_PKT_LENGTH];
+  ssize_t bytes_read = 0;
+  uint8_t data[] = { 0x02, 0x10, 0x02, 0x42, 0x03, 0x02, 0x56, 0x03 };
+  pkt_queue_t* q = pkt_queue_create();
+  pkt_queue_write_bytes(q, sizeof(data), data);
+  pkt_queue_read_pkt(q, &bytes_read, datums);
+  if (bytes_read != 1)
+  {
+    return 17;
+  }
+  if (datums[0] != 0x42)
+  {
+    return 18;
+  }
+  pkt_queue_close(q);
+  pkt_queue_read_pkt(q, &bytes_read, datums);
+  if (bytes_read != 1)
+  {
+    return 19;
+  }
+  if (datums[0] != 0x56)
+  {
+    return 20;
+  }
+  pkt_queue_read_pkt(q, &bytes_read, datums);
+  if (bytes_read != -1)
+  {
+    return 21;
+  }
   pkt_queue_destroy(q);
   return 0;
 };
