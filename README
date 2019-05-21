@@ -1,0 +1,8 @@
+// TODOs
+- add condvar for packet reads
+- Silently drop bad stuff - so check for unescaped packet starts too.
+
+
+// Questions/clarifications:
+- should len always be -1 when no packets remain? What if the queue hasn't been closed yet?
+- When a packet exceeds max length, do I drop it or serve it?
