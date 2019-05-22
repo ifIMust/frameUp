@@ -11,10 +11,11 @@ int testIncompleteFrameMidEscapeStart();
 int testTwoPacketsInOneWrite();
 int testNoPacketsAvailable();
 int testCloseWhileReadBlocked();
+int testWriteAfterClose();
 
 int main()
 {
-  const int numTests = 7;
+  const int numTests = 8;
   int result[numTests];
   result[0] = testMultiplePacketStart();
   result[1] = testGivenExample();
@@ -23,6 +24,7 @@ int main()
   result[4] = testTwoPacketsInOneWrite();
   result[5] = testNoPacketsAvailable();
   result[6] = testCloseWhileReadBlocked();
+  result[7] = testWriteAfterClose();
   for (int i = 0; i < numTests; i = i + 1)
   {
     if (result[i] != 0)
@@ -265,5 +267,22 @@ int testCloseWhileReadBlocked()
     return 23;
   }
   pkt_queue_destroy(q);
+  return 0;
+}
+
+/* Test that writing to a queue after it has been closed will not produce further packets */
+int testWriteAfterClose()
+{
+  const uint8_t bytestream[] = {0x02, 0x10, 0x30, 0xFF, 0x03};
+  uint8_t pkt_buffer[MAX_DECODED_PKT_LENGTH];
+  ssize_t bytes_read = 0;
+  pkt_queue_t* q = pkt_queue_create();
+  pkt_queue_close(q);
+  pkt_queue_write_bytes(q, sizeof(bytestream), bytestream);
+  pkt_queue_read_pkt(q, &bytes_read, pkt_buffer);
+  if (bytes_read != -1)
+  {
+    return 22;
+  }
   return 0;
 }
