@@ -25,6 +25,7 @@ struct pkt_queue
   struct pkt* tail;
 
   pthread_mutex_t mutex;
+  pthread_cond_t eventcondition;
 
   uint8_t rawinput[];
 };

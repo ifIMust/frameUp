@@ -1,5 +1,7 @@
 #include "pkt_queue.h"
-
+#include <pthread.h>
+#include <string.h>
+#include <unistd.h>
 #define MAX_DECODED_PKT_LENGTH 256
 
 int testMultiplePacketStart();
@@ -7,16 +9,20 @@ int testGivenExample();
 int testIncompleteFrameMidEscapeEnd();
 int testIncompleteFrameMidEscapeStart();
 int testTwoPacketsInOneWrite();
+int testNoPacketsAvailable();
+int testCloseWhileReadBlocked();
 
 int main()
 {
-  const int numTests = 5;
+  const int numTests = 7;
   int result[numTests];
   result[0] = testMultiplePacketStart();
   result[1] = testGivenExample();
   result[2] = testIncompleteFrameMidEscapeEnd();
   result[3] = testIncompleteFrameMidEscapeStart();
   result[4] = testTwoPacketsInOneWrite();
+  result[5] = testNoPacketsAvailable();
+  result[6] = testCloseWhileReadBlocked();
   for (int i = 0; i < numTests; i = i + 1)
   {
     if (result[i] != 0)
@@ -53,7 +59,6 @@ int testGivenExample()
   struct pkt_queue *q = NULL;
   ssize_t pkt_len = 0;
   uint8_t pkt_buffer[MAX_DECODED_PKT_LENGTH];
-
   q = pkt_queue_create();
   if (q == 0)
   {
@@ -175,3 +180,90 @@ int testTwoPacketsInOneWrite()
   pkt_queue_destroy(q);
   return 0;
 };
+
+struct threadDataForWrite
+{
+  pkt_queue_t *q;
+  uint8_t* data;
+};
+
+void writeBytes(void* thrData)
+{
+  struct threadDataForWrite* t = (struct threadDataForWrite*)thrData;
+  pkt_queue_write_bytes(t->q, sizeof(t->data), t->data);
+}
+
+/* Test that a read will block until a packet becomes available */
+int testNoPacketsAvailable()
+{
+  struct threadDataForWrite thrData;
+  const uint8_t data[] = { 0x02, 0x04, 0x56, 0x03 };
+  uint8_t datums[MAX_DECODED_PKT_LENGTH];
+  ssize_t bytes_read = 0;
+  pkt_queue_t* q = pkt_queue_create();
+  pthread_t thread;
+  int error = 0;
+  thrData.q = q;
+  thrData.data = malloc(sizeof(data));
+  memcpy(thrData.data, data, sizeof(data));
+  error = pthread_create(&thread, 0, (void*)(&writeBytes), &thrData);
+  if (error != 0)
+  {
+    return error;
+  }
+  pkt_queue_read_pkt(q, &bytes_read, datums);
+  error = pthread_join(thread, 0);
+  if (error != 0)
+  {
+    return error;
+  }
+
+  if (bytes_read != 2)
+  {
+    return 13;
+  }
+  pkt_queue_destroy(q);
+  return 0;
+}
+
+struct threadDataForRead
+{
+  pkt_queue_t *q;
+  ssize_t bytes_read;
+  uint8_t data[32];
+};
+
+void readBytes(void* thrData)
+{
+  struct threadDataForRead* t = (struct threadDataForRead*)thrData;
+  pkt_queue_read_pkt(t->q, &(t->bytes_read), t->data);
+}
+
+/* Test correct behavior when the queue is closed when another thread is blocked on a read */
+int testCloseWhileReadBlocked()
+{
+  struct threadDataForRead thrData;
+  pkt_queue_t* q = pkt_queue_create();
+  pthread_t thread;
+  int error = 0;
+  thrData.q = q;
+  error = pthread_create(&thread, 0, (void*)(&readBytes), &thrData);
+  if (error != 0)
+  {
+    return error;
+  }
+  sleep(1);
+  pkt_queue_close(q);
+  error = pthread_join(thread, 0);
+  if (error != 0)
+  {
+    return error;
+  }
+
+  if (thrData.bytes_read != -1)
+  {
+    return 23;
+  }
+  pkt_queue_destroy(q);
+  return 0;
+}

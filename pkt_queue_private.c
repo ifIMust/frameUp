@@ -5,6 +5,8 @@
 #include <sys/types.h>
 #include <string.h>
 
+#include <stdio.h> // TODO RMME
+
 // Protocol markers
 #define PKT_START 0x02
 #define PKT_END 0x03
@@ -14,7 +16,6 @@
 struct pkt_queue* pkt_queue_create(void)
 {
   int error = 0;
-  pthread_mutexattr_t mutexattr;
   struct pkt_queue* q = malloc(sizeof(struct pkt_queue) + MAX_PKT_SIZE);
   if (q == 0)
   {
@@ -25,17 +26,20 @@ struct pkt_queue* pkt_queue_create(void)
   q->closed = 0;
   q->head = 0;
   q->tail = 0;
-  error = pthread_mutexattr_init(&mutexattr);
+
+  // Set up the mutex
+  error = pthread_mutex_init(&(q->mutex), 0);
   if (error != 0)
   {
     return 0;
   }
-  error = pthread_mutex_init(&(q->mutex), &mutexattr);
+
+  // Set up the "packet available" condition
+  error = pthread_cond_init(&(q->eventcondition), 0);
   if (error != 0)
   {
     return 0;
   }
-  pthread_mutexattr_destroy(&mutexattr);
   return q;
 }
 
@@ -48,10 +52,9 @@ void pkt_queue_destroy(struct pkt_queue *queue)
     pkt_destroy(queue->head);
     queue->head = nextPkt;
   }
+  pthread_cond_destroy(&(queue->eventcondition));
   pthread_mutex_unlock(&(queue->mutex));
   pthread_mutex_destroy(&(queue->mutex));
-
-  // TODO Destroy the condvar
   free(queue);
 }
 
@@ -157,6 +160,8 @@ void pkt_queue_write_bytes(struct pkt_queue *queue, size_t len, const uint8_t *d
       if (completed_pkt != 0)
       {
         add_pkt(queue, completed_pkt);
+        printf("Packet created; signaling condition\n");
+        pthread_cond_signal(&(queue->eventcondition));
       }
       queue->rawinputsize = 0;
       queue->readstate = STATE_FIND_START;
@@ -171,17 +176,12 @@ void pkt_queue_close(struct pkt_queue *queue)
 {
   pthread_mutex_lock(&(queue->mutex));
   queue->closed = 1;
+  pthread_cond_signal(&(queue->eventcondition));
   pthread_mutex_unlock(&(queue->mutex));
 }
 
-void pkt_queue_read_pkt(struct pkt_queue *queue, ssize_t *len, uint8_t *data)
+void pop_pkt(struct pkt_queue *queue, ssize_t *len, uint8_t *data)
 {
-  // TODO condvar wait for pkt available
-  if (queue->head == 0)
-  {
-    *len = -1;
-    return;
-  }
   struct pkt* packet = queue->head;
   *len = packet->size;
   memcpy(data, packet->data, packet->size);
@@ -191,4 +191,39 @@ void pkt_queue_read_pkt(struct pkt_queue *queue, ssize_t *len, uint8_t *data)
     queue->tail = 0;
   }
   pkt_destroy(packet);
+}
+
+void pkt_queue_read_pkt(struct pkt_queue *queue, ssize_t *len, uint8_t *data)
+{
+  printf("Obtaining the mutex...\n");
+  pthread_mutex_lock(&(queue->mutex));
+  if (queue->closed)
+  {
+    if (queue->head == 0)
+    {
+      *len = -1;
+    }
+    else
+    {
+      pop_pkt(queue, len, data);
+    }
+    pthread_mutex_unlock(&(queue->mutex));
+    return;
+  }
+
+  if (queue->head == 0)
+  {
+    printf("No packets available currently- Waiting on the condvar...\n");
+    pthread_cond_wait(&(queue->eventcondition), &(queue->mutex));
+  }
+  if (queue->head == 0 && queue->closed)
+  {
+    printf("Queue is closed and no packets remain...\n");
+    *len = -1;
+  }
+  else
+  {
+    pop_pkt(queue, len, data);
+  }
+  pthread_mutex_unlock(&(queue->mutex));
 }

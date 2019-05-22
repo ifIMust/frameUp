@@ -1,8 +1,9 @@
 // TODOs
-- add condvar for packet reads
-- Silently drop bad stuff - so check for unescaped packet starts too.
+- Disallow writes to the queue when it is closed(?)
+- Use condvars in the test cases to guarantee sequence and remove sleep
+- Handle a packet that is too long (drop)
 
-
-// Questions/clarifications:
-- should len always be -1 when no packets remain? What if the queue hasn't been closed yet?
-- When a packet exceeds max length, do I drop it or serve it?
+Assumptions:
+- pkt_queue_destroy will not be called while any blocking queue operations are in progress.
+- pkt_queue_close disallows further writes.
+- If a packet exceeds the maximum permitted length, it will be dropped.
