@@ -84,90 +84,93 @@ void pkt_queue_write_bytes(struct pkt_queue *queue, size_t len, const uint8_t *d
   uint8_t datum = 0;
   struct pkt *completed_pkt = 0;
   pthread_mutex_lock(&(queue->mutex));
-  while (pos < len)
+  if (!queue->closed)
   {
-    datum = data[pos];
-    if (queue->readstate == STATE_FIND_END ||
-        queue->readstate == STATE_ESCAPE_NEXT)
+    while (pos < len)
     {
-      // TODO check for rawinputsize >= MAX_PKT_SIZE and rename it to max input size perhaps
-    }
-    switch (queue->readstate)
-    {
-    case STATE_FIND_START:
-      if (datum == PKT_START)
+      datum = data[pos];
+      if (queue->readstate == STATE_FIND_END ||
+          queue->readstate == STATE_ESCAPE_NEXT)
       {
-        queue->readstate = STATE_FIND_END;
+        // TODO check for rawinputsize >= MAX_PKT_SIZE and rename it to max input size perhaps
       }
-      pos = pos + 1;
-      break;
-      
-    case STATE_FIND_END:
-      if (datum == PKT_END)
+      switch (queue->readstate)
       {
-        queue->readstate = STATE_FINALIZE;
-      }
-      else
-      {
+      case STATE_FIND_START:
         if (datum == PKT_START)
         {
-          queue->rawinputsize = 0;
-          queue->readstate = STATE_FIND_START;
+          queue->readstate = STATE_FIND_END;
+        }
+        pos = pos + 1;
+        break;
+      
+      case STATE_FIND_END:
+        if (datum == PKT_END)
+        {
+          queue->readstate = STATE_FINALIZE;
         }
         else
         {
-          if (datum == PKT_ESC)
+          if (datum == PKT_START)
           {
-            queue->readstate = STATE_ESCAPE_NEXT;
+            queue->rawinputsize = 0;
+            queue->readstate = STATE_FIND_START;
           }
           else
           {
-            add_raw_byte(queue, datum);
+            if (datum == PKT_ESC)
+            {
+              queue->readstate = STATE_ESCAPE_NEXT;
+            }
+            else
+            {
+              add_raw_byte(queue, datum);
+            }
+            pos = pos + 1;
           }
-          pos = pos + 1;
         }
-      }
-      break;
+        break;
 
-    case STATE_ESCAPE_NEXT:
-      if (datum == PKT_START)
-      {
-        queue->readstate = STATE_FIND_START;
-        queue->rawinputsize = 0;
-      }
-      else
-      {
-        if ((datum & PKT_ESC_MASK) == PKT_ESC_MASK)
+      case STATE_ESCAPE_NEXT:
+        if (datum == PKT_START)
         {
-          // The byte is escaped properly and not a frame start, so use it
-          // once the mask has been stripped.
-          datum = datum & ~PKT_ESC_MASK;
-          add_raw_byte(queue, datum);
-          queue->readstate = STATE_FIND_END;
-        }
-        else
-        {
-          // Invalid sequence, discard the partial packet
           queue->readstate = STATE_FIND_START;
           queue->rawinputsize = 0;
         }
-        pos = pos + 1;
-      }
-      break;
+        else
+        {
+          if ((datum & PKT_ESC_MASK) == PKT_ESC_MASK)
+          {
+            // The byte is escaped properly and not a frame start, so use it
+            // once the mask has been stripped.
+            datum = datum & ~PKT_ESC_MASK;
+            add_raw_byte(queue, datum);
+            queue->readstate = STATE_FIND_END;
+          }
+          else
+          {
+            // Invalid sequence, discard the partial packet
+            queue->readstate = STATE_FIND_START;
+            queue->rawinputsize = 0;
+          }
+          pos = pos + 1;
+        }
+        break;
       
-    case STATE_FINALIZE:
-      completed_pkt = pkt_create(queue->rawinputsize, queue->rawinput);
-      if (completed_pkt != 0)
-      {
-        add_pkt(queue, completed_pkt);
-        printf("Packet created; signaling condition\n");
-        pthread_cond_signal(&(queue->eventcondition));
-      }
-      queue->rawinputsize = 0;
-      queue->readstate = STATE_FIND_START;
-      pos = pos + 1;
-      break;
-    };
+      case STATE_FINALIZE:
+        completed_pkt = pkt_create(queue->rawinputsize, queue->rawinput);
+        if (completed_pkt != 0)
+        {
+          add_pkt(queue, completed_pkt);
+          printf("Packet created; signaling condition\n");
+          pthread_cond_signal(&(queue->eventcondition));
+        }
+        queue->rawinputsize = 0;
+        queue->readstate = STATE_FIND_START;
+        pos = pos + 1;
+        break;
+      };
+    }
   }
   pthread_mutex_unlock(&(queue->mutex));
 }

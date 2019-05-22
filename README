@@ -1,5 +1,4 @@
 // TODOs
-- Disallow writes to the queue when it is closed(?)
 - Use condvars in the test cases to guarantee sequence and remove sleep
 - Handle a packet that is too long (drop)
 
