@@ -1,8 +1,11 @@
-// TODOs
-- Use condvars in the test cases to guarantee sequence and remove sleep
-- Handle a packet that is too long (drop)
+Examples of how to build the tests:
+gcc test_pkt_queue.c pkt_queue_private.c pkt_private.c -o test_pkt_queue -pthread
+gcc test_pkt.c pkt_private.c -o test_pkt
+
+Each test binary returns 0 if successful, and non-zero if one or more tests failed.
 
 Assumptions:
 - pkt_queue_destroy will not be called while any blocking queue operations are in progress.
 - pkt_queue_close disallows further writes.
 - If a packet exceeds the maximum permitted length, it will be dropped.
+- Any 0x02 byte found in a byte stream will cause a new packet to be started immediately, and all previous state to be dropped (even after a 0x10).

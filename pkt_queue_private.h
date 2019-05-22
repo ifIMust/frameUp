@@ -5,7 +5,6 @@
 #include <sys/types.h>
 #include <pthread.h>
 
-#define MAX_PKT_SIZE 256
 #define STATE_FIND_START  1
 #define STATE_FIND_END    2
 #define STATE_ESCAPE_NEXT 3

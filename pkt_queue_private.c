@@ -5,18 +5,17 @@
 #include <sys/types.h>
 #include <string.h>
 
-#include <stdio.h> // TODO RMME
-
 // Protocol markers
 #define PKT_START 0x02
 #define PKT_END 0x03
 #define PKT_ESC 0x10
 #define PKT_ESC_MASK 0x20
+#define MAX_DECODED_PACKET_LEN (512)
 
 struct pkt_queue* pkt_queue_create(void)
 {
   int error = 0;
-  struct pkt_queue* q = malloc(sizeof(struct pkt_queue) + MAX_PKT_SIZE);
+  struct pkt_queue* q = malloc(sizeof(struct pkt_queue) + MAX_DECODED_PACKET_LEN);
   if (q == 0)
   {
     return q;
@@ -89,16 +88,16 @@ void pkt_queue_write_bytes(struct pkt_queue *queue, size_t len, const uint8_t *d
     while (pos < len)
     {
       datum = data[pos];
-      if (queue->readstate == STATE_FIND_END ||
-          queue->readstate == STATE_ESCAPE_NEXT)
+      if (queue->rawinputsize > MAX_DECODED_PACKET_LEN)
       {
-        // TODO check for rawinputsize >= MAX_PKT_SIZE and rename it to max input size perhaps
+        queue->readstate = STATE_FIND_START;
       }
       switch (queue->readstate)
       {
       case STATE_FIND_START:
         if (datum == PKT_START)
         {
+          queue->rawinputsize = 0;
           queue->readstate = STATE_FIND_END;
         }
         pos = pos + 1;
@@ -113,7 +112,6 @@ void pkt_queue_write_bytes(struct pkt_queue *queue, size_t len, const uint8_t *d
         {
           if (datum == PKT_START)
           {
-            queue->rawinputsize = 0;
             queue->readstate = STATE_FIND_START;
           }
           else
@@ -135,7 +133,6 @@ void pkt_queue_write_bytes(struct pkt_queue *queue, size_t len, const uint8_t *d
         if (datum == PKT_START)
         {
           queue->readstate = STATE_FIND_START;
-          queue->rawinputsize = 0;
         }
         else
         {
@@ -151,7 +148,6 @@ void pkt_queue_write_bytes(struct pkt_queue *queue, size_t len, const uint8_t *d
           {
             // Invalid sequence, discard the partial packet
             queue->readstate = STATE_FIND_START;
-            queue->rawinputsize = 0;
           }
           pos = pos + 1;
         }
@@ -162,10 +158,8 @@ void pkt_queue_write_bytes(struct pkt_queue *queue, size_t len, const uint8_t *d
         if (completed_pkt != 0)
         {
           add_pkt(queue, completed_pkt);
-          printf("Packet created; signaling condition\n");
           pthread_cond_signal(&(queue->eventcondition));
         }
-        queue->rawinputsize = 0;
         queue->readstate = STATE_FIND_START;
         pos = pos + 1;
         break;
@@ -198,7 +192,6 @@ void pop_pkt(struct pkt_queue *queue, ssize_t *len, uint8_t *data)
 
 void pkt_queue_read_pkt(struct pkt_queue *queue, ssize_t *len, uint8_t *data)
 {
-  printf("Obtaining the mutex...\n");
   pthread_mutex_lock(&(queue->mutex));
   if (queue->closed)
   {
@@ -216,12 +209,10 @@ void pkt_queue_read_pkt(struct pkt_queue *queue, ssize_t *len, uint8_t *data)
 
   if (queue->head == 0)
   {
-    printf("No packets available currently- Waiting on the condvar...\n");
     pthread_cond_wait(&(queue->eventcondition), &(queue->mutex));
   }
   if (queue->head == 0 && queue->closed)
   {
-    printf("Queue is closed and no packets remain...\n");
     *len = -1;
   }
   else

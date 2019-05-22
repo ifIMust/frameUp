@@ -2,7 +2,6 @@
 #include <pthread.h>
 #include <string.h>
 #include <unistd.h>
-#define MAX_DECODED_PKT_LENGTH 256
 
 int testMultiplePacketStart();
 int testGivenExample();
@@ -12,10 +11,12 @@ int testTwoPacketsInOneWrite();
 int testNoPacketsAvailable();
 int testCloseWhileReadBlocked();
 int testWriteAfterClose();
+int testWriteLongPacket();
+int testWriteExcessivelyLongPacket();
 
 int main()
 {
-  const int numTests = 8;
+  const int numTests = 10;
   int result[numTests];
   result[0] = testMultiplePacketStart();
   result[1] = testGivenExample();
@@ -25,6 +26,8 @@ int main()
   result[5] = testNoPacketsAvailable();
   result[6] = testCloseWhileReadBlocked();
   result[7] = testWriteAfterClose();
+  result[8] = testWriteLongPacket();
+  result[9] = testWriteExcessivelyLongPacket();
   for (int i = 0; i < numTests; i = i + 1)
   {
     if (result[i] != 0)
@@ -36,7 +39,7 @@ int main()
 
 int testMultiplePacketStart()
 {
-  uint8_t datums[MAX_DECODED_PKT_LENGTH];
+  uint8_t datums[MAX_DECODED_PACKET_LEN];
   ssize_t bytes_read = 0;
   uint8_t data[] = { 0x02, 0x04, 0x02, 0x56, 0x03 };
   pkt_queue_t* q = pkt_queue_create();
@@ -62,7 +65,7 @@ int testGivenExample()
   const uint8_t bytestream[] = {0x02, 0x10, 0x30, 0xFF, 0x03};
   struct pkt_queue *q = NULL;
   ssize_t pkt_len = 0;
-  uint8_t pkt_buffer[MAX_DECODED_PKT_LENGTH];
+  uint8_t pkt_buffer[MAX_DECODED_PACKET_LEN];
   q = pkt_queue_create();
   if (q == 0)
   {
@@ -99,7 +102,7 @@ int testGivenExample()
 /* Test that a packet-end that follows an escape causes the partial packet to be dropped. */
 int testIncompleteFrameMidEscapeEnd()
 {
-  uint8_t datums[MAX_DECODED_PKT_LENGTH];
+  uint8_t datums[MAX_DECODED_PACKET_LEN];
   ssize_t bytes_read = 0;
   uint8_t data[] = { 0x02, 0x04, 0x05, 0x10, 0x03, 0x03, 0x02, 0x56, 0x03 };
   pkt_queue_t* q = pkt_queue_create();
@@ -121,13 +124,9 @@ int testIncompleteFrameMidEscapeEnd()
 };
 
 /* Test that a packet-start that follows an escape causes the partial packet to be dropped. */
-/* Question: How can I tell whether a packet is improperly encoded versus incomplete? */
-/* Incomplete: finding a 0x02 after an escape means begin a new packet immediately. */
-/* Improperly encoded: finidng a 0x02 after an escape means drop everything and look for the next 0x02. */
-// uint8_t data[] = { 0x02, 0x10, 0x02, 0x42, 0x03, 0x02, 0x56, 0x03 };
 int testIncompleteFrameMidEscapeStart()
 {
-  uint8_t datums[MAX_DECODED_PKT_LENGTH];
+  uint8_t datums[MAX_DECODED_PACKET_LEN];
   ssize_t bytes_read = 0;
   uint8_t data[] = { 0x02, 0x10, 0x02, 0x42, 0x03, 0x02, 0x56, 0x03 };
   pkt_queue_t* q = pkt_queue_create();
@@ -168,7 +167,7 @@ int testIncompleteFrameMidEscapeStart()
 /* Test that packets are queued properly */
 int testTwoPacketsInOneWrite()
 {
-  uint8_t datums[MAX_DECODED_PKT_LENGTH];
+  uint8_t datums[MAX_DECODED_PACKET_LEN];
   ssize_t bytes_read = 0;
   uint8_t data[] = { 0x02, 0x04, 0x05, 0x03, 0x02, 0x56, 0x03 };
   pkt_queue_t* q = pkt_queue_create();
@@ -217,7 +216,7 @@ int testNoPacketsAvailable()
 {
   struct threadDataForWrite thrData;
   const uint8_t data[] = { 0x02, 0x04, 0x56, 0x03 };
-  uint8_t datums[MAX_DECODED_PKT_LENGTH];
+  uint8_t datums[MAX_DECODED_PACKET_LEN];
   ssize_t bytes_read = 0;
   pkt_queue_t* q = pkt_queue_create();
   pthread_t thread;
@@ -297,7 +296,7 @@ int testCloseWhileReadBlocked()
 int testWriteAfterClose()
 {
   const uint8_t bytestream[] = {0x02, 0x10, 0x30, 0xFF, 0x03};
-  uint8_t pkt_buffer[MAX_DECODED_PKT_LENGTH];
+  uint8_t pkt_buffer[MAX_DECODED_PACKET_LEN];
   ssize_t bytes_read = 0;
   pkt_queue_t* q = pkt_queue_create();
   pkt_queue_close(q);
@@ -312,17 +311,42 @@ int testWriteAfterClose()
   return 0;
 }
 
+/* Test that a maxium-size packet is handled, also test many small writes. */
+int testWriteLongPacket()
+{
+  pkt_queue_t* q = pkt_queue_create();
+  uint8_t datum = 0x02;
+  uint8_t pkt_buffer[MAX_DECODED_PACKET_LEN];
+  ssize_t bytes_read = 0;
+  pkt_queue_write_bytes(q, 1, &datum);
+  datum = 0xEE;
+  for (int i = 0; i < MAX_DECODED_PACKET_LEN; i = i + 1)
+  {
+    pkt_queue_write_bytes(q, 1, &datum);
+  }
+  datum = 0x03;
+  pkt_queue_write_bytes(q, 1, &datum);
+  pkt_queue_read_pkt(q, &bytes_read, pkt_buffer);
+  if (bytes_read != MAX_DECODED_PACKET_LEN)
+  {
+    pkt_queue_destroy(q);
+    return 26;
+  }
+  pkt_queue_destroy(q);
+  return 0;
+}
+
 /* Test that a huge packet will be dropped, also test many small writes. */
 int testWriteExcessivelyLongPacket()
 {
   pkt_queue_t* q = pkt_queue_create();
   const uint8_t properPacket[] = { 0x02, 0x12, 0x23, 0x03 };
   uint8_t datum = 0x02;
-  uint8_t pkt_buffer[MAX_DECODED_PKT_LENGTH];
+  uint8_t pkt_buffer[MAX_DECODED_PACKET_LEN];
   ssize_t bytes_read = 0;
   pkt_queue_write_bytes(q, 1, &datum);
   datum = 0xEE;
-  for (int i = 0; i < MAX_DECODED_PKT_LENGTH + 3; i = i + 1)
+  for (int i = 0; i < MAX_DECODED_PACKET_LEN + 3; i = i + 1)
   {
     pkt_queue_write_bytes(q, 1, &datum);
   }
@@ -333,7 +357,7 @@ int testWriteExcessivelyLongPacket()
   if (bytes_read != 2)
   {
     pkt_queue_destroy(q);
-    return 25;
+    return 27;
   }
   pkt_queue_destroy(q);
   return 0;
