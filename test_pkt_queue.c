@@ -44,10 +44,12 @@ int testMultiplePacketStart()
   pkt_queue_read_pkt(q, &bytes_read, datums);
   if (bytes_read != 1)
   {
+    pkt_queue_destroy(q);
     return 1;
   }
   if (datums[0] != 0x56)
   {
+    pkt_queue_destroy(q);
     return 2;
   }
   pkt_queue_close(q);
@@ -64,6 +66,7 @@ int testGivenExample()
   q = pkt_queue_create();
   if (q == 0)
   {
+    pkt_queue_destroy(q);
     return 3;
   }
   
@@ -73,17 +76,20 @@ int testGivenExample()
   pkt_queue_read_pkt(q, &pkt_len, pkt_buffer);
   if (pkt_len != 2)
   {
+    pkt_queue_destroy(q);
     return 4;
   }
 
   if (pkt_buffer[0] != 0x10 || pkt_buffer[1] != 0xFF)
   {
+    pkt_queue_destroy(q);
     return 5;
   }
 
   pkt_queue_read_pkt(q, &pkt_len, pkt_buffer);
   if (pkt_len != -1)
   {
+    pkt_queue_destroy(q);
     return 6;
   }
   pkt_queue_destroy(q);
@@ -101,10 +107,12 @@ int testIncompleteFrameMidEscapeEnd()
   pkt_queue_read_pkt(q, &bytes_read, datums);
   if (bytes_read != 1)
   {
+    pkt_queue_destroy(q);
     return 7;
   }
   if (datums[0] != 0x56)
   {
+    pkt_queue_destroy(q);
     return 8;
   }
   pkt_queue_close(q);
@@ -127,25 +135,30 @@ int testIncompleteFrameMidEscapeStart()
   pkt_queue_read_pkt(q, &bytes_read, datums);
   if (bytes_read != 1)
   {
+    pkt_queue_destroy(q);
     return 17;
   }
   if (datums[0] != 0x42)
   {
+    pkt_queue_destroy(q);
     return 18;
   }
   pkt_queue_close(q);
   pkt_queue_read_pkt(q, &bytes_read, datums);
   if (bytes_read != 1)
   {
+    pkt_queue_destroy(q);
     return 19;
   }
   if (datums[0] != 0x56)
   {
+    pkt_queue_destroy(q);
     return 20;
   }
   pkt_queue_read_pkt(q, &bytes_read, datums);
   if (bytes_read != -1)
   {
+    pkt_queue_destroy(q);
     return 21;
   }
   pkt_queue_destroy(q);
@@ -163,20 +176,24 @@ int testTwoPacketsInOneWrite()
   pkt_queue_read_pkt(q, &bytes_read, datums);
   if (bytes_read != 2)
   {
+    pkt_queue_destroy(q);
     return 9;
   }
   if (datums[0] != 0x04 || datums[1] != 0x05 )
   {
+    pkt_queue_destroy(q); 
     return 10;
   }
   pkt_queue_close(q);
   pkt_queue_read_pkt(q, &bytes_read, datums);
   if (bytes_read != 1)
   {
+    pkt_queue_destroy(q);
     return 11;
   }
   if (datums[0] != 0x56)
   {
+    pkt_queue_destroy(q);
     return 12;
   }
   pkt_queue_destroy(q);
@@ -211,17 +228,20 @@ int testNoPacketsAvailable()
   error = pthread_create(&thread, 0, (void*)(&writeBytes), &thrData);
   if (error != 0)
   {
+    pkt_queue_destroy(q);
     return error;
   }
   pkt_queue_read_pkt(q, &bytes_read, datums);
   error = pthread_join(thread, 0);
   if (error != 0)
   {
+    pkt_queue_destroy(q);
     return error;
   }
 
   if (bytes_read != 2)
   {
+    pkt_queue_destroy(q);
     return 13;
   }
   pkt_queue_destroy(q);
@@ -252,6 +272,7 @@ int testCloseWhileReadBlocked()
   error = pthread_create(&thread, 0, (void*)(&readBytes), &thrData);
   if (error != 0)
   {
+    pkt_queue_destroy(q);
     return error;
   }
   sleep(1);
@@ -259,11 +280,13 @@ int testCloseWhileReadBlocked()
   error = pthread_join(thread, 0);
   if (error != 0)
   {
+    pkt_queue_destroy(q);
     return error;
   }
 
   if (thrData.bytes_read != -1)
   {
+    pkt_queue_destroy(q);
     return 23;
   }
   pkt_queue_destroy(q);
@@ -282,7 +305,36 @@ int testWriteAfterClose()
   pkt_queue_read_pkt(q, &bytes_read, pkt_buffer);
   if (bytes_read != -1)
   {
+    pkt_queue_destroy(q);
     return 22;
   }
+  pkt_queue_destroy(q);
+  return 0;
+}
+
+/* Test that a huge packet will be dropped, also test many small writes. */
+int testWriteExcessivelyLongPacket()
+{
+  pkt_queue_t* q = pkt_queue_create();
+  const uint8_t properPacket[] = { 0x02, 0x12, 0x23, 0x03 };
+  uint8_t datum = 0x02;
+  uint8_t pkt_buffer[MAX_DECODED_PKT_LENGTH];
+  ssize_t bytes_read = 0;
+  pkt_queue_write_bytes(q, 1, &datum);
+  datum = 0xEE;
+  for (int i = 0; i < MAX_DECODED_PKT_LENGTH + 3; i = i + 1)
+  {
+    pkt_queue_write_bytes(q, 1, &datum);
+  }
+  datum = 0x03;
+  pkt_queue_write_bytes(q, 1, &datum);
+  pkt_queue_write_bytes(q, sizeof(properPacket), properPacket);
+  pkt_queue_read_pkt(q, &bytes_read, pkt_buffer);
+  if (bytes_read != 2)
+  {
+    pkt_queue_destroy(q);
+    return 25;
+  }
+  pkt_queue_destroy(q);
   return 0;
 }
